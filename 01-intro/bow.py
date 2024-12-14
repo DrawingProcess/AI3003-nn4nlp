@@ -38,6 +38,7 @@ if use_cuda:
     type = torch.cuda.LongTensor
     model.cuda()
 
+print("Training started: bow")
 max_test_accuracy = 0.0
 for ITER in range(100):
     # Perform training

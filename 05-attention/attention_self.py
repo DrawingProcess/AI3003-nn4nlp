@@ -13,6 +13,9 @@ import nltk
 from nltk.translate.bleu_score import sentence_bleu
 from plot_attention import plot_attention
 import copy
+import os
+
+from torch.nn import MultiheadAttention
 
 # Data paths
 train_src_file = "../data/parallel/train.ja"
@@ -86,12 +89,19 @@ train_loader = DataLoader(TranslationDataset(train_data), batch_size=BATCH_SIZE,
 dev_loader = DataLoader(TranslationDataset(dev_data), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
 class Seq2SeqAttention(nn.Module):
-    def __init__(self, nwords_src, nwords_trg, embed_size, hidden_size, attention_size):
+    def __init__(self, nwords_src, nwords_trg, embed_size, hidden_size, attention_size, num_heads=8):
         super(Seq2SeqAttention, self).__init__()
         self.embedding_src = nn.Embedding(nwords_src, embed_size)
         self.embedding_trg = nn.Embedding(nwords_trg, embed_size)
+        
+        # Encoder self-attention layer
+        self.encoder_self_attn = MultiheadAttention(embed_size, num_heads, batch_first=True)
         self.encoder_lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
+        
+        # Decoder self-attention layer
+        self.decoder_self_attn = MultiheadAttention(embed_size, num_heads, batch_first=True)
         self.decoder_lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
+        
         self.fc = nn.Linear(hidden_size, nwords_trg)
     
         # Attention parameters
@@ -114,19 +124,25 @@ class Seq2SeqAttention(nn.Module):
 
     def forward(self, src, trg):
         embedded_src = self.embedding_src(src)
-        encoder_outputs, _ = self.encoder_lstm(embedded_src)
-
-        # Decoder
         embedded_trg = self.embedding_trg(trg)
-        
+
+        # Encoder self-attention
+        encoder_self_attn_output, _ = self.encoder_self_attn(embedded_src, embedded_src, embedded_src)
+
+        # Encoder LSTM
+        encoder_outputs, _ = self.encoder_lstm(encoder_self_attn_output)
+
+        # Decoder self-attention
+        decoder_self_attn_output, _ = self.decoder_self_attn(embedded_trg, embedded_trg, embedded_trg)
+
         # Decoder LSTM and attention
         all_logits = []
         trg_len = trg.size(1)
         batch_size = src.size(0)
-        
+
         h, c = self.init_hidden(batch_size)
         for i in range(trg_len - 1):
-            tgt_input = embedded_trg[:, i, :].unsqueeze(1)
+            tgt_input = decoder_self_attn_output[:, i, :].unsqueeze(1)
             lstm_output, (h, c) = self.decoder_lstm(tgt_input, (h, c))
             att_output, _ = self.calc_attention(encoder_outputs, lstm_output.squeeze(1))
             concat_output = torch.cat([lstm_output.squeeze(1), att_output], dim=1)
@@ -134,7 +150,7 @@ class Seq2SeqAttention(nn.Module):
             logits = self.out_sm(final_output)
             all_logits.append(logits)
 
-        return torch.stack(all_logits, dim=1)  # Shape: (batch_size, trg_len-1, vocab_size)
+        return torch.stack(all_logits, dim=1)
 
     def generate(self, src_sent):
         # Embed source sentence
@@ -289,4 +305,6 @@ output_sent, attention_matrix = best_model.generate(src)
 attention_matrix = attention_matrix.squeeze(1).transpose(0,1).detach().cpu().numpy()
 
 #note: this can break for long sentences with long words
-plot_attention(input_sent, output_sent, attention_matrix, 'attention_matrix.png')
+script_name = os.path.basename(__file__)
+filename = os.path.splitext(script_name)[0] + '_matrix.png'
+plot_attention(input_sent, output_sent, attention_matrix, filename)

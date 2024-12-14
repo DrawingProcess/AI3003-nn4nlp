@@ -171,6 +171,7 @@ def evaluate(model, dev_loader):
 
     return total_loss / total_words
 
+print("Training started: enc_dec.py")
 # Training loop
 max_test_bleu = 0.0
 for epoch in range(100):

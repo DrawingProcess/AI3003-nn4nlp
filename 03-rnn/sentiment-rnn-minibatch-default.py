@@ -52,24 +52,21 @@ train_loader = DataLoader(TextDataset(train_data), batch_size=BATCH_SIZE, shuffl
 dev_loader = DataLoader(TextDataset(dev_data), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
 # Define the model
-EMB_SIZE = 512 # The size of the embedding: balence of representation power and model complexity
-HID_SIZE = 256 # The size of the hidden layer
+EMB_SIZE = 64
+HID_SIZE = 64
 
 class RNNModel(nn.Module):
     def __init__(self, nwords, ntags, emb_size, hidden_size):
         super(RNNModel, self).__init__()
         self.embedding = nn.Embedding(nwords, emb_size)
-        # self.rnn = nn.RNN(emb_size, hidden_size, batch_first=True)
-        # self.fc = nn.Linear(hidden_size, ntags)
-        self.rnn = nn.LSTM(emb_size, hidden_size, batch_first=True, bidirectional=True)
-        self.fc = nn.Linear(hidden_size * 2, ntags)
-        self.dropout = nn.Dropout(0.5)
-        
+        self.rnn = nn.RNN(emb_size, hidden_size, batch_first=True)
+        self.fc = nn.Linear(hidden_size, ntags)
+    
         # Initialize weights
         self.init_weights()
-        
+    
     def init_weights(self):
-        # Apply Xavier initialization to linear and recurrent layers
+        # Apply Xavier initialization to all linear and recurrent layers
         for name, param in self.named_parameters():
             if 'weight' in name:
                 nn.init.xavier_uniform_(param.data)
@@ -77,18 +74,15 @@ class RNNModel(nn.Module):
                 param.data.fill_(0)  # Initialize biases to zero
     
     def forward(self, sentences):
-        # embeds = self.embedding(sentences)  # [batch_size x len(sentences[1]) x emb_size]
-        embeds = self.dropout(self.embedding(sentences))  # [batch_size x len(sentences[1]) x emb_size]
+        embeds = self.embedding(sentences)  # [batch_size x len(sentences[1]) x emb_size]
         rnn_out, _ = self.rnn(embeds)       # [batch_size x len(sentences[1]) x hidden_size]
         logits = self.fc(rnn_out[:, -1, :]) # Use the last hidden state for classification
         return logits
 
 model = RNNModel(nwords, ntags, EMB_SIZE, HID_SIZE)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
-scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
 criterion = nn.CrossEntropyLoss()
 
-print("Training started: sentiment-rnn-minibatch.py")
 # Training loop
 max_test_accuracy = 0.0
 for ITER in range(100):
@@ -105,7 +99,6 @@ for ITER in range(100):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        # scheduler.step()
     
     print(f"iter {ITER}: train loss/sent={train_loss / len(train_loader):.4f}, time={time.time() - start:.2f}s")
 

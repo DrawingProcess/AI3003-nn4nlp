@@ -34,30 +34,86 @@ MAX_SENT_SIZE = 50
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Read parallel data
-def read(fname_src, fname_trg):
-    with open(fname_src, "r") as f_src, open(fname_trg, "r") as f_trg:
+# # Read parallel data
+# def read(fname_src, fname_trg):
+#     with open(fname_src, "r") as f_src, open(fname_trg, "r") as f_trg:
+#         for line_src, line_trg in zip(f_src, f_trg):
+#             sent_src = [w2i_src[x] for x in line_src.strip().split() + ['</s>']]
+#             sent_trg = [w2i_trg[x] for x in ['<s>'] + line_trg.strip().split() + ['</s>']]
+#             yield (sent_src, sent_trg)
+
+# # Build vocab and load data
+# train_data = list(read(train_src_file, train_trg_file))
+# dev_data = list(read(dev_src_file, dev_trg_file))
+# test_data = list(read(test_src_file, test_trg_file))
+
+# unk_src = w2i_src['<unk>']
+# eos_src = w2i_src['</s>']
+# pad_src = w2i_src['<pad>']
+# w2i_src = defaultdict(lambda: unk_src, w2i_src)
+# unk_trg = w2i_trg['<unk>']
+# eos_trg = w2i_trg['</s>']
+# sos_trg = w2i_trg['<s>']
+# pad_trg = w2i_trg['<pad>']
+# w2i_trg = defaultdict(lambda: unk_trg, w2i_trg)
+
+# Special tokens
+PAD_TOKEN = '<pad>'
+SOS_TOKEN = '<s>'
+EOS_TOKEN = '</s>'
+UNK_TOKEN = '<unk>'
+
+# Initialize vocabularies
+w2i_src = {PAD_TOKEN: 0, SOS_TOKEN: 1, EOS_TOKEN: 2, UNK_TOKEN: 3}
+w2i_trg = {PAD_TOKEN: 0, SOS_TOKEN: 1, EOS_TOKEN: 2, UNK_TOKEN: 3}
+
+def read_data_and_build_vocab(src_file, trg_file):
+    data = []
+    with open(src_file, 'r') as f_src, open(trg_file, 'r') as f_trg:
         for line_src, line_trg in zip(f_src, f_trg):
-            sent_src = [w2i_src[x] for x in line_src.strip().split() + ['</s>']]
-            sent_trg = [w2i_trg[x] for x in ['<s>'] + line_trg.strip().split() + ['</s>']]
-            yield (sent_src, sent_trg)
+            src_tokens = line_src.strip().split() + [EOS_TOKEN]
+            trg_tokens = [SOS_TOKEN] + line_trg.strip().split() + [EOS_TOKEN]
+            src_indices = []
+            trg_indices = []
 
-# Build vocab and load data
-train_data = list(read(train_src_file, train_trg_file))
-dev_data = list(read(dev_src_file, dev_trg_file))
-test_data = list(read(test_src_file, test_trg_file))
+            for token in src_tokens:
+                if token not in w2i_src:
+                    w2i_src[token] = len(w2i_src)
+                src_indices.append(w2i_src[token])
 
-unk_src = w2i_src['<unk>']
-eos_src = w2i_src['</s>']
-pad_src = w2i_src['<pad>']
-w2i_src = defaultdict(lambda: unk_src, w2i_src)
-unk_trg = w2i_trg['<unk>']
-eos_trg = w2i_trg['</s>']
-sos_trg = w2i_trg['<s>']
-pad_trg = w2i_trg['<pad>']
-w2i_trg = defaultdict(lambda: unk_trg, w2i_trg)
+            for token in trg_tokens:
+                if token not in w2i_trg:
+                    w2i_trg[token] = len(w2i_trg)
+                trg_indices.append(w2i_trg[token])
+
+            data.append((src_indices, trg_indices))
+    return data
+
+def read_data(src_file, trg_file):
+    data = []
+    with open(src_file, 'r') as f_src, open(trg_file, 'r') as f_trg:
+        for line_src, line_trg in zip(f_src, f_trg):
+            src_tokens = line_src.strip().split() + [EOS_TOKEN]
+            trg_tokens = [SOS_TOKEN] + line_trg.strip().split() + [EOS_TOKEN]
+            src_indices = [w2i_src.get(token, w2i_src[UNK_TOKEN]) for token in src_tokens]
+            trg_indices = [w2i_trg.get(token, w2i_trg[UNK_TOKEN]) for token in trg_tokens]
+            data.append((src_indices, trg_indices))
+    return data
+
+train_data = read_data_and_build_vocab(train_src_file, train_trg_file)
+dev_data = read_data(dev_src_file, dev_trg_file)
+test_data = read_data(test_src_file, test_trg_file)
+
 i2w_trg = {v: k for k, v in w2i_trg.items()}
 i2w_src = {v: k for k, v in w2i_src.items()}
+
+# Special token indices
+pad_src = w2i_src[PAD_TOKEN]
+sos_trg = w2i_trg[SOS_TOKEN]
+eos_trg = w2i_trg[EOS_TOKEN]
+pad_trg = w2i_trg[PAD_TOKEN]
+unk_src = w2i_src[UNK_TOKEN]
+unk_trg = w2i_trg[UNK_TOKEN]
 
 nwords_src = len(w2i_src)
 nwords_trg = len(w2i_trg)
@@ -182,7 +238,8 @@ class Seq2SeqAttention(nn.Module):
 
 # Model and optimizer
 model = Seq2SeqAttention(nwords_src, nwords_trg, EMBED_SIZE, HIDDEN_SIZE, ATTENTION_SIZE).to(device)
-optimizer = optim.Adam(model.parameters())
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2, verbose=True)
 # Ignore padding token in loss calculation
 criterion = nn.CrossEntropyLoss(ignore_index=pad_trg)
 
@@ -211,6 +268,8 @@ def train_epoch(model, train_loader, optimizer):
 
         optimizer.zero_grad()
         loss.backward()
+        # Issue: During training, gradients can sometimes become too large, leading to unstable training or "exploding gradients".
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
         optimizer.step()
 
         # Compute total loss
@@ -250,6 +309,7 @@ for epoch in range(100):
     train_loss = train_epoch(model, train_loader, optimizer)
     dev_loss = evaluate(model, dev_loader)
     print(f"Epoch {epoch}: Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Perplexity: {math.exp(dev_loss):.4f}")
+    scheduler.step(dev_loss)
 
     # Generate translation and compute BLEU score on test set
     test_loader = DataLoader(TranslationDataset(test_data), batch_size=1, shuffle=False, collate_fn=collate_fn)

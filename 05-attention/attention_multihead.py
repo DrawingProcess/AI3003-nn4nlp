@@ -13,6 +13,8 @@ import nltk
 from nltk.translate.bleu_score import sentence_bleu
 from plot_attention import plot_attention
 import copy
+import os
+
 
 # Data paths
 train_src_file = "../data/parallel/train.ja"
@@ -86,21 +88,24 @@ train_loader = DataLoader(TranslationDataset(train_data), batch_size=BATCH_SIZE,
 dev_loader = DataLoader(TranslationDataset(dev_data), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
 class Seq2SeqAttention(nn.Module):
-    def __init__(self, nwords_src, nwords_trg, embed_size, hidden_size, attention_size):
+    def __init__(self, nwords_src, nwords_trg, embed_size, hidden_size, attention_size, num_heads=8):
         super(Seq2SeqAttention, self).__init__()
         self.embedding_src = nn.Embedding(nwords_src, embed_size)
         self.embedding_trg = nn.Embedding(nwords_trg, embed_size)
         self.encoder_lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
         self.decoder_lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, nwords_trg)
-    
-        # Attention parameters
-        self.att_w1_src = nn.Linear(hidden_size, attention_size)
-        self.att_w1_tgt = nn.Linear(hidden_size, attention_size)
-        self.att_w2 = nn.Linear(attention_size, 1)
+        
+        # Remove custom attention parameters
+        # self.att_w1_src = nn.Linear(hidden_size, attention_size)
+        # self.att_w1_tgt = nn.Linear(hidden_size, attention_size)
+        # self.att_w2 = nn.Linear(attention_size, 1)
+        
+        # Multi-head attention layer
+        self.multihead_attn = MultiheadAttention(hidden_size, num_heads, batch_first=True)
         
         # Output layers
-        self.out_w = nn.Linear(hidden_size*2, hidden_size)
+        self.out_w = nn.Linear(hidden_size * 2, hidden_size)
         self.out_sm = nn.Linear(hidden_size, nwords_trg)
 
     def calc_attention(self, src_vectors, tgt_vector):
@@ -115,11 +120,9 @@ class Seq2SeqAttention(nn.Module):
     def forward(self, src, trg):
         embedded_src = self.embedding_src(src)
         encoder_outputs, _ = self.encoder_lstm(embedded_src)
-
-        # Decoder
+        
         embedded_trg = self.embedding_trg(trg)
         
-        # Decoder LSTM and attention
         all_logits = []
         trg_len = trg.size(1)
         batch_size = src.size(0)
@@ -128,13 +131,17 @@ class Seq2SeqAttention(nn.Module):
         for i in range(trg_len - 1):
             tgt_input = embedded_trg[:, i, :].unsqueeze(1)
             lstm_output, (h, c) = self.decoder_lstm(tgt_input, (h, c))
-            att_output, _ = self.calc_attention(encoder_outputs, lstm_output.squeeze(1))
-            concat_output = torch.cat([lstm_output.squeeze(1), att_output], dim=1)
+            
+            # Multi-head attention
+            attn_output, attn_weights = self.multihead_attn(lstm_output, encoder_outputs, encoder_outputs)
+            
+            # Concatenate LSTM output and attention output
+            concat_output = torch.cat([lstm_output.squeeze(1), attn_output.squeeze(1)], dim=1)
             final_output = torch.tanh(self.out_w(concat_output))
             logits = self.out_sm(final_output)
             all_logits.append(logits)
-
-        return torch.stack(all_logits, dim=1)  # Shape: (batch_size, trg_len-1, vocab_size)
+        
+        return torch.stack(all_logits, dim=1)
 
     def generate(self, src_sent):
         # Embed source sentence
@@ -289,4 +296,6 @@ output_sent, attention_matrix = best_model.generate(src)
 attention_matrix = attention_matrix.squeeze(1).transpose(0,1).detach().cpu().numpy()
 
 #note: this can break for long sentences with long words
-plot_attention(input_sent, output_sent, attention_matrix, 'attention_matrix.png')
+script_name = os.path.basename(__file__)
+filename = os.path.splitext(script_name)[0] + '_matrix.png'
+plot_attention(input_sent, output_sent, attention_matrix, filename)

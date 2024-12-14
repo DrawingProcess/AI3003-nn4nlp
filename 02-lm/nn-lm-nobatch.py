@@ -103,6 +103,7 @@ def generate_sent():
 last_dev = 1e20
 best_dev = 1e20
 
+print("Training started: nn-lm-nobatch")
 for ITER in range(5):
   # Perform training
   random.shuffle(train)

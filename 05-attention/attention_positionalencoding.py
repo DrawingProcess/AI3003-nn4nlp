@@ -85,11 +85,33 @@ def collate_fn(batch):
 train_loader = DataLoader(TranslationDataset(train_data), batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
 dev_loader = DataLoader(TranslationDataset(dev_data), batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, embed_size, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_len, embed_size)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, embed_size, 2).float() * (-math.log(10000.0) / embed_size))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        if embed_size % 2 == 1:
+            pe[:, 1::2] = torch.cos(position * div_term)[:,:-1]
+        else:
+            pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+    
+    def forward(self, x):
+        x = x + self.pe[:, :x.size(1), :].to(x.device)
+        return x
+
 class Seq2SeqAttention(nn.Module):
-    def __init__(self, nwords_src, nwords_trg, embed_size, hidden_size, attention_size):
+    def __init__(self, nwords_src, nwords_trg, embed_size, hidden_size, attention_size, num_heads=8):
         super(Seq2SeqAttention, self).__init__()
         self.embedding_src = nn.Embedding(nwords_src, embed_size)
         self.embedding_trg = nn.Embedding(nwords_trg, embed_size)
+        
+        # Positional encoding layers
+        self.positional_encoding = PositionalEncoding(embed_size)
+
         self.encoder_lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
         self.decoder_lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, nwords_trg)
@@ -114,11 +136,12 @@ class Seq2SeqAttention(nn.Module):
 
     def forward(self, src, trg):
         embedded_src = self.embedding_src(src)
+        embedded_src = self.positional_encoding(embedded_src)
         encoder_outputs, _ = self.encoder_lstm(embedded_src)
-
-        # Decoder
-        embedded_trg = self.embedding_trg(trg)
         
+        embedded_trg = self.embedding_trg(trg)
+        embedded_trg = self.positional_encoding(embedded_trg)
+    
         # Decoder LSTM and attention
         all_logits = []
         trg_len = trg.size(1)

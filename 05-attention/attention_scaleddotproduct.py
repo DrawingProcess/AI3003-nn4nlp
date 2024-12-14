@@ -103,14 +103,21 @@ class Seq2SeqAttention(nn.Module):
         self.out_w = nn.Linear(hidden_size*2, hidden_size)
         self.out_sm = nn.Linear(hidden_size, nwords_trg)
 
-    def calc_attention(self, src_vectors, tgt_vector):
-        att_src = self.att_w1_src(src_vectors)
-        att_tgt = self.att_w1_tgt(tgt_vector).unsqueeze(1)
-        att_combined = torch.tanh(att_src + att_tgt)
-        attention_scores = self.att_w2(att_combined).squeeze(2)
-        attention_weights = torch.softmax(attention_scores, dim=1)
-        att_vector = torch.bmm(attention_weights.unsqueeze(1), src_vectors).squeeze(1)
-        return att_vector, attention_weights
+    def calc_attention(self, encoder_outputs, decoder_hidden):
+        # encoder_outputs: (batch_size, src_len, hidden_size)
+        # decoder_hidden: (batch_size, hidden_size)
+        
+        # Compute attention scores
+        scores = torch.bmm(encoder_outputs, decoder_hidden.unsqueeze(2)).squeeze(2)
+        scores = scores / math.sqrt(encoder_outputs.size(2))  # Scale by sqrt of hidden_size
+        
+        # Compute attention weights
+        attention_weights = torch.softmax(scores, dim=1)
+        
+        # Compute context vector
+        context_vector = torch.bmm(attention_weights.unsqueeze(1), encoder_outputs).squeeze(1)
+        
+        return context_vector, attention_weights
 
     def forward(self, src, trg):
         embedded_src = self.embedding_src(src)

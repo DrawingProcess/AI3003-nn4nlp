@@ -57,6 +57,7 @@ model = RNNModel(nwords, ntags, EMB_SIZE, HID_SIZE)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 criterion = nn.CrossEntropyLoss()
 
+print("Training started: sentiment-rnn.py")
 # Training loop
 for ITER in range(100):
     # Perform training
@@ -65,8 +66,9 @@ for ITER in range(100):
     start = time.time()
     model.train()
 
+    # Modify input to add batch dimension
     for words, tag in tqdm(train_data):
-        words = torch.tensor(words)
+        words = torch.tensor(words)  # Add batch dimension
         tag = torch.tensor(tag)
 
         logits = model(words)
@@ -82,11 +84,13 @@ for ITER in range(100):
     # Perform evaluation
     model.eval()
     test_correct = 0.0
+    # Modify input to add batch dimension during evaluation
     with torch.no_grad():
         for words, tag in tqdm(dev_data):
-            words = torch.tensor(words)
+            words = torch.tensor(words)  # Add batch dimension
             logits = model(words)
             predict = torch.argmax(logits).item()
             if predict == tag:
                 test_correct += 1
+
     print(f"iter {ITER}: test acc={test_correct / len(dev):.4f}")
